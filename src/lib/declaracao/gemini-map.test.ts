@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mapLoteRowDeterministic } from "./fallback-map";
+import { mapLoteRowWithGemini } from "./gemini-map";
 import type { LoteParseRow } from "./parse-lote";
 
 /** Garante que o fallback (usado quando Gemini falha) cobre o contrato do JSON. */
@@ -31,5 +32,17 @@ describe("contrato DeclaracaoDestinatario (fallback = seam Gemini)", () => {
       "uf",
     ]);
     expect(mapped.fone).toBe("");
+  });
+
+  it("não chama Gemini quando o endereço já está no padrão Luci", async () => {
+    const mapped = await mapLoteRowWithGemini(row, {
+      apiKey: "",
+      now: new Date(2026, 9, 20),
+    });
+    expect(mapped).toEqual(
+      mapLoteRowDeterministic(row, new Date(2026, 9, 20)),
+    );
+    expect(mapped.cidade).toBe("Cidade");
+    expect(mapped.uf).toBe("SC");
   });
 });

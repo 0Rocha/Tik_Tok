@@ -9,6 +9,7 @@ import {
   removeItem,
   updateItem,
 } from "@/lib/domain/lote";
+import { mapLoteToXlsxRows } from "@/lib/domain/export-mapper";
 import type { ApiFields, LoteItem } from "@/lib/domain/types";
 import {
   formatDateBr,
@@ -21,6 +22,49 @@ import {
   loadLoteFromStorage,
   saveLoteToStorage,
 } from "@/lib/storage/lote-storage";
+
+function filenameFromDisposition(
+  disposition: string | null,
+  fallback: string,
+): string {
+  const match = disposition?.match(/filename="([^"]+)"/);
+  return match?.[1] ?? fallback;
+}
+
+async function downloadDeclaracaoFromLote(
+  lote: LoteItem[],
+): Promise<{ count: number; filename: string }> {
+  const res = await fetch("/api/declaracoes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows: mapLoteToXlsxRows(lote) }),
+  });
+
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(data?.error || `Falha HTTP ${res.status}`);
+  }
+
+  const countHeader = res.headers.get("X-Declaracoes-Count");
+  const count = countHeader ? Number(countHeader) : lote.length;
+  const filename = filenameFromDisposition(
+    res.headers.get("Content-Disposition"),
+    lote.length === 1 ? "declaracao.xlsx" : "declaracoes.zip",
+  );
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  return {
+    count: Number.isFinite(count) ? count : lote.length,
+    filename,
+  };
+}
 
 type ManualForm = {
   solicitante: string;
@@ -66,6 +110,9 @@ export function ColetaApp() {
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportPhase, setExportPhase] = useState<"xlsx" | "declaracao" | null>(
+    null,
+  );
 
   useEffect(() => {
     const loaded = loadLoteFromStorage();
@@ -235,29 +282,63 @@ export function ColetaApp() {
   }
 
   async function handleExport() {
+    const declPreview =
+      lote.length === 1
+        ? "a declaração em .xlsx (formato do modelo)"
+        : `o ZIP com ${lote.length} declarações`;
+    if (
+      !window.confirm(
+        `Confirmar exportação do lote?\n\nSerá baixado o XLSX do lote e, em seguida, ${declPreview}.`,
+      )
+    ) {
+      return;
+    }
+
     setError(null);
+    setMessage(null);
     setExporting(true);
+    setExportPhase("xlsx");
+
+    let xlsxOk = false;
     try {
       await downloadLoteXlsx(lote);
+      xlsxOk = true;
+      setExportPhase("declaracao");
+      setMessage("XLSX do lote baixado. Gerando declaração…");
+
+      const { count, filename } = await downloadDeclaracaoFromLote(lote);
+      const declOk = filename.toLowerCase().endsWith(".zip")
+        ? `${count} declarações no ZIP`
+        : `a declaração ${filename}`;
+      setMessage(`Pronto: XLSX do lote e ${declOk}.`);
+
       const clearAfter = window.confirm(
-        "Exportação concluída. Deseja limpar o lote agora?\n\nOK = limpar | Cancelar = manter (padrão recomendado).",
+        "Exportação e declaração concluídas. Deseja limpar o lote agora?\n\nOK = limpar | Cancelar = manter (padrão recomendado).",
       );
       if (clearAfter) {
         setLote(createEmptyLote());
         clearLoteStorage();
         resetForm();
-        setMessage("Exportação concluída e lote limpo.");
+        setMessage(`Pronto: XLSX do lote e ${declOk}. Lote limpo.`);
       } else {
         setMessage(
-          "Exportação concluída. O lote foi mantido no navegador até você limpar manualmente.",
+          `Pronto: XLSX do lote e ${declOk}. O lote foi mantido no navegador até você limpar manualmente.`,
         );
       }
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Falha na geração do arquivo.",
-      );
+      const detail =
+        err instanceof Error ? err.message : "Falha na geração do arquivo.";
+      if (xlsxOk) {
+        setError(
+          `XLSX baixado, mas as declarações falharam: ${detail}. Use /declaracao com o XLSX como contingência.`,
+        );
+        setMessage(null);
+      } else {
+        setError(detail);
+      }
     } finally {
       setExporting(false);
+      setExportPhase(null);
     }
   }
 
@@ -265,18 +346,20 @@ export function ColetaApp() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          Coleta e exportação XLSX
+          Coleta, exportação e declarações
         </h1>
         <p className="text-sm text-zinc-600">
           Obrigatórios: usuário, nome, CPF e endereço. Demais campos são
-          opcionais. O lote fica neste navegador (`localStorage`).
+          opcionais. O lote fica neste navegador (`localStorage`). Ao exportar,
+          o sistema baixa o XLSX do lote e a declaração no formato do modelo:
+          um .xlsx se houver uma pessoa, ou um ZIP se houver várias.
         </p>
         <p className="text-sm text-zinc-500">
           <Link
             href="/declaracao"
             className="underline-offset-2 hover:underline"
           >
-            Gerar declarações de conteúdo a partir do XLSX →
+            Gerar a partir de um XLSX já salvo →
           </Link>
         </p>
       </header>
@@ -422,7 +505,11 @@ export function ColetaApp() {
               disabled={lote.length === 0 || exporting}
               className="rounded bg-zinc-900 px-4 py-2 text-sm text-white disabled:opacity-50"
             >
-              {exporting ? "Exportando…" : "Exportar XLSX"}
+              {exportPhase === "declaracao"
+                ? "Gerando declarações…"
+                : exporting
+                  ? "Exportando XLSX…"
+                  : "Exportar XLSX + declarações"}
             </button>
             <button
               type="button"

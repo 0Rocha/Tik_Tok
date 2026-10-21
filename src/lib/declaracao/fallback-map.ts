@@ -68,6 +68,12 @@ export function parseLuciEndereco(endereco: string): {
   return { endereco: raw, bairro: "", cidade: "", uf: "", cep: "" };
 }
 
+/** Endereço Luci já separado em cidade, UF e CEP — não precisa de Gemini. */
+export function enderecoNoPadraoLuci(endereco: string): boolean {
+  const parsed = parseLuciEndereco(endereco);
+  return Boolean(parsed.cidade && parsed.uf && parsed.cep);
+}
+
 export function formatDataExtenso(iso: string, now = new Date()): string {
   let y: number;
   let m: number;

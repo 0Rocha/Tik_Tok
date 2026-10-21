@@ -3,6 +3,7 @@ import {
   formatCep,
   formatCpf,
   formatDataExtenso,
+  enderecoNoPadraoLuci,
   mapLoteRowDeterministic,
   type DeclaracaoDestinatario,
 } from "./fallback-map";
@@ -63,6 +64,10 @@ export async function mapLoteRowWithGemini(
   options?: { apiKey?: string; now?: Date },
 ): Promise<DeclaracaoDestinatario> {
   const fallback = mapLoteRowDeterministic(row, options?.now);
+  if (enderecoNoPadraoLuci(row.endereco)) {
+    return fallback;
+  }
+
   const apiKey = options?.apiKey ?? process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY não configurada no servidor.");

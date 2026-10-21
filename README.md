@@ -1,11 +1,12 @@
-# Coleta e exportação XLSX
+# Coleta, exportação XLSX e declarações
 
-Aplicação Next.js (App Router) para consultar um distribuidor na API LuciLuci, completar campos manuais, montar um lote e exportar um `.xlsx` com as 10 colunas oficiais.
+Aplicação Next.js (App Router) para consultar um distribuidor na API LuciLuci, completar campos manuais, montar um lote, exportar um `.xlsx` com as 10 colunas oficiais e gerar automaticamente o ZIP de declarações de conteúdo.
 
 ## Requisitos
 
 - Node.js 20+
 - Credenciais LuciLuci (`API_USERNAME` / `API_PASSWORD_BASE64`)
+- `GEMINI_API_KEY` (para gerar declarações na exportação ou em `/declaracao`)
 
 ## Configuração
 
@@ -41,7 +42,7 @@ npm run dev
 
 Abra [http://localhost:3000](http://localhost:3000).
 
-Para gerar declarações de conteúdo a partir do lote exportado: [http://localhost:3000/declaracao](http://localhost:3000/declaracao) (requer `GEMINI_API_KEY`).
+Contingência (XLSX já salvo, sem lote no navegador): [http://localhost:3000/declaracao](http://localhost:3000/declaracao).
 
 ## Uso
 
@@ -50,7 +51,7 @@ Para gerar declarações de conteúdo a partir do lote exportado: [http://localh
 3. Campos manuais são **opcionais** (solicitante, data, valor, envio, rastreio, correio).
 4. Adicione ao lote (duplicidade de `usuario` só avisa).
 5. Revise, edite ou remova itens.
-6. **Exportar XLSX** — o lote permanece no navegador até **Limpar lote**.
+6. **Exportar XLSX + declarações** — confirma, baixa o XLSX do lote e em seguida a declaração no formato do modelo: **1 registro → `.xlsx`**; **vários → ZIP** com um `.xlsx` por pessoa. Endereço no padrão Luci (`logradouro - bairro - cidade/UF - cep`) não usa Gemini; os demais precisam de `GEMINI_API_KEY`. Só depois pergunta se quer limpar o lote.
 
 ## Persistência
 

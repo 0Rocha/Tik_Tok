@@ -36,20 +36,21 @@ export function DeclaracaoApp() {
       }
 
       const count = res.headers.get("X-Declaracoes-Count");
+      const disposition = res.headers.get("Content-Disposition");
+      const match = disposition?.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? "declaracao.xlsx";
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      const disposition = res.headers.get("Content-Disposition");
-      const match = disposition?.match(/filename="([^"]+)"/);
       a.href = url;
-      a.download = match?.[1] ?? "declaracoes.zip";
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
 
       setMessage(
-        count
-          ? `Pronto: ${count} declaração(ões) no ZIP.`
-          : "Pronto: ZIP baixado.",
+        filename.toLowerCase().endsWith(".zip")
+          ? `Pronto: ${count ?? "várias"} declarações no ZIP.`
+          : `Pronto: declaração baixada (${filename}).`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha na geração.");
@@ -70,8 +71,10 @@ export function DeclaracaoApp() {
           Gerar declarações de conteúdo
         </h1>
         <p className="text-sm text-zinc-600">
-          Envie o XLSX do lote. O servidor copia o modelo fixo (remetente +
-          produtos) e preenche o destinatário com ajuda do Gemini.
+          Contingência: envie um XLSX do lote já exportado (útil se o lote não
+          estiver mais no navegador). Uma pessoa baixa a declaração em .xlsx;
+          várias, um ZIP. O servidor copia o modelo fixo (remetente + produtos)
+          e preenche só o destinatário.
         </p>
       </header>
 
@@ -110,7 +113,7 @@ export function DeclaracaoApp() {
           disabled={loading || !file}
           className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? "Gerando declarações…" : "Gerar ZIP"}
+          {loading ? "Gerando declaração…" : "Gerar declaração"}
         </button>
       </form>
     </div>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  enderecoNoPadraoLuci,
   formatDataExtenso,
   mapLoteRowDeterministic,
   parseLuciEndereco,
@@ -28,6 +29,20 @@ describe("parseLuciEndereco", () => {
       uf: "",
       cep: "",
     });
+  });
+});
+
+describe("enderecoNoPadraoLuci", () => {
+  it("reconhece cidade, UF e CEP já separados", () => {
+    expect(
+      enderecoNoPadraoLuci(
+        "Avenida Santos Dumont, 513 - Vila Junção - RIO GRANDE/RS - 96202-090",
+      ),
+    ).toBe(true);
+  });
+
+  it("recusa endereço sem o padrão", () => {
+    expect(enderecoNoPadraoLuci("Só uma linha sem padrão")).toBe(false);
   });
 });
 

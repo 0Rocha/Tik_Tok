@@ -1,71 +1,113 @@
-import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
-import { buildDeclaracoesZip } from "@/lib/declaracao/build-zip";
-import { mapLoteRowsWithGemini } from "@/lib/declaracao/gemini-map";
+import type { XlsxRow } from "@/lib/domain/types";
+import {
+  generateDeclaracoesFromRows,
+  type DeclaracoesArquivo,
+} from "@/lib/declaracao/generate-from-rows";
 import { parseLoteBuffer } from "@/lib/declaracao/parse-lote";
-import { getDeclaracaoTemplatePath } from "@/lib/declaracao/template-path";
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
+const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function arquivoResponse(arquivo: DeclaracoesArquivo): NextResponse {
+  return new NextResponse(new Uint8Array(arquivo.bytes), {
+    status: 200,
+    headers: {
+      "Content-Type": arquivo.kind === "xlsx" ? XLSX_MIME : "application/zip",
+      "Content-Disposition": `attachment; filename="${arquivo.filename}"`,
+      "X-Declaracoes-Count": String(arquivo.count),
+    },
+  });
 }
 
-function zipFilename(now = new Date()): string {
-  return `declaracoes-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.zip`;
+function errorStatus(message: string): number {
+  return /cabeçalho|lote vazio|faltam campos|linha \d+|envie|json|rows/i.test(
+    message,
+  )
+    ? 400
+    : 500;
 }
 
-export async function POST(request: Request) {
-  if (!process.env.GEMINI_API_KEY?.trim()) {
-    return NextResponse.json(
-      { error: "GEMINI_API_KEY não configurada no servidor." },
-      { status: 500 },
-    );
+function isXlsxRow(value: unknown): value is XlsxRow {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.solicitante === "string" &&
+    typeof row.data === "string" &&
+    typeof row.usuario === "string" &&
+    typeof row.nome === "string" &&
+    typeof row.cpf === "string" &&
+    typeof row.endereco === "string" &&
+    typeof row.envio === "string" &&
+    typeof row.codigoRastreio === "string" &&
+    (row.valor === null || typeof row.valor === "number") &&
+    (row.correio === null || typeof row.correio === "number")
+  );
+}
+
+async function rowsFromJson(request: Request): Promise<XlsxRow[]> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    throw new Error("JSON inválido.");
   }
 
+  if (
+    !body ||
+    typeof body !== "object" ||
+    !("rows" in body) ||
+    !Array.isArray((body as { rows: unknown }).rows)
+  ) {
+    throw new Error('Envie JSON no formato { "rows": [...] }.');
+  }
+
+  const raw = (body as { rows: unknown[] }).rows;
+  if (!raw.every(isXlsxRow)) {
+    throw new Error(
+      "Cada item de rows deve ter os campos do lote (strings e valor/correio number|null).",
+    );
+  }
+  return raw;
+}
+
+async function rowsFromMultipart(request: Request): Promise<XlsxRow[]> {
   let form: FormData;
   try {
     form = await request.formData();
   } catch {
-    return NextResponse.json(
-      { error: "Não foi possível ler o formulário (envie multipart/form-data)." },
-      { status: 400 },
+    throw new Error(
+      "Não foi possível ler o formulário (envie multipart/form-data).",
     );
   }
 
   const file = form.get("file");
   if (!(file instanceof File)) {
-    return NextResponse.json(
-      { error: "Envie o arquivo do lote no campo file." },
-      { status: 400 },
-    );
+    throw new Error("Envie o arquivo do lote no campo file.");
   }
   if (!file.name.toLowerCase().endsWith(".xlsx")) {
-    return NextResponse.json(
-      { error: "O arquivo deve ser .xlsx." },
-      { status: 400 },
-    );
+    throw new Error("O arquivo deve ser .xlsx.");
   }
 
-  try {
-    const loteBuffer = await file.arrayBuffer();
-    const rows = await parseLoteBuffer(loteBuffer);
-    const destinatarios = await mapLoteRowsWithGemini(rows);
-    const template = await fs.readFile(getDeclaracaoTemplatePath());
-    const zip = await buildDeclaracoesZip(template, destinatarios);
+  return parseLoteBuffer(await file.arrayBuffer());
+}
 
-    return new NextResponse(new Uint8Array(zip), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${zipFilename()}"`,
-        "X-Declaracoes-Count": String(destinatarios.length),
-      },
-    });
+export async function POST(request: Request) {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  try {
+    const rows = contentType.includes("application/json")
+      ? await rowsFromJson(request)
+      : await rowsFromMultipart(request);
+
+    const arquivo = await generateDeclaracoesFromRows(rows);
+    return arquivoResponse(arquivo);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Falha ao gerar declarações.";
-    const status = /cabeçalho|lote vazio|faltam campos|linha \d+/i.test(message)
-      ? 400
-      : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json(
+      { error: message },
+      { status: errorStatus(message) },
+    );
   }
 }
