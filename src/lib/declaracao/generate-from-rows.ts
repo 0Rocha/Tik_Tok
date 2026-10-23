@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { parseProdutos, type ProdutoItem } from "@/lib/domain/listas-produtos";
 import type { XlsxRow } from "@/lib/domain/types";
 import { buildDeclaracoesZip, declaracaoFilenames } from "./build-zip";
 import { fillDeclaracaoTemplate } from "./fill-template";
@@ -41,14 +42,16 @@ export function assertValidLoteRows(rows: XlsxRow[]): void {
 
 export async function generateDeclaracoesFromRows(
   rows: XlsxRow[],
+  produtos?: ProdutoItem[],
 ): Promise<DeclaracoesArquivo> {
   assertValidLoteRows(rows);
+  const lista = produtos === undefined ? undefined : parseProdutos(produtos);
   const destinatarios = await mapLoteRowsWithGemini(rows);
   const template = await fs.readFile(getDeclaracaoTemplatePath());
 
   if (destinatarios.length === 1) {
     const dest = destinatarios[0]!;
-    const xlsx = await fillDeclaracaoTemplate(template, dest);
+    const xlsx = await fillDeclaracaoTemplate(template, dest, lista);
     return {
       kind: "xlsx",
       filename: declaracaoFilenames([dest.nome])[0]!,
@@ -57,7 +60,7 @@ export async function generateDeclaracoesFromRows(
     };
   }
 
-  const zip = await buildDeclaracoesZip(template, destinatarios);
+  const zip = await buildDeclaracoesZip(template, destinatarios, lista);
   return {
     kind: "zip",
     filename: declaracoesZipFilename(),

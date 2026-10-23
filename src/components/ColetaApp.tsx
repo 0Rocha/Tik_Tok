@@ -17,11 +17,16 @@ import {
   validateManualFields,
 } from "@/lib/domain/validators";
 import { downloadLoteXlsx } from "@/lib/export/xlsx";
+import { produtosSelecionados } from "@/lib/domain/listas-produtos";
 import {
   clearLoteStorage,
   loadLoteFromStorage,
   saveLoteToStorage,
 } from "@/lib/storage/lote-storage";
+import {
+  ListasProdutosEditor,
+  useListasProdutos,
+} from "@/components/ListasProdutosEditor";
 
 function filenameFromDisposition(
   disposition: string | null,
@@ -33,11 +38,12 @@ function filenameFromDisposition(
 
 async function downloadDeclaracaoFromLote(
   lote: LoteItem[],
+  produtos: { quantidade: number; nome: string; valor: number }[],
 ): Promise<{ count: number; filename: string }> {
   const res = await fetch("/api/declaracoes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rows: mapLoteToXlsxRows(lote) }),
+    body: JSON.stringify({ rows: mapLoteToXlsxRows(lote), produtos }),
   });
 
   if (!res.ok) {
@@ -113,6 +119,7 @@ export function ColetaApp() {
   const [exportPhase, setExportPhase] = useState<"xlsx" | "declaracao" | null>(
     null,
   );
+  const listas = useListasProdutos();
 
   useEffect(() => {
     const loaded = loadLoteFromStorage();
@@ -282,6 +289,13 @@ export function ColetaApp() {
   }
 
   async function handleExport() {
+    const selecionada = produtosSelecionados(listas.state);
+    if (!selecionada.ok) {
+      setError(selecionada.error);
+      setMessage(null);
+      return;
+    }
+
     const declPreview =
       lote.length === 1
         ? "a declaração em .xlsx (formato do modelo)"
@@ -306,7 +320,10 @@ export function ColetaApp() {
       setExportPhase("declaracao");
       setMessage("XLSX do lote baixado. Gerando declaração…");
 
-      const { count, filename } = await downloadDeclaracaoFromLote(lote);
+      const { count, filename } = await downloadDeclaracaoFromLote(
+        lote,
+        selecionada.produtos,
+      );
       const declOk = filename.toLowerCase().endsWith(".zip")
         ? `${count} declarações no ZIP`
         : `a declaração ${filename}`;
@@ -493,16 +510,23 @@ export function ColetaApp() {
         </form>
       </section>
 
+      <ListasProdutosEditor
+        heading="3. Listas de produtos"
+        state={listas.state}
+        onChange={listas.setState}
+        warning={listas.warning}
+      />
+
       <section className="space-y-4 rounded border border-zinc-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-medium text-zinc-900">
-            3. Lote ({lote.length})
+            4. Lote ({lote.length})
           </h2>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={handleExport}
-              disabled={lote.length === 0 || exporting}
+              disabled={lote.length === 0 || exporting || !listas.hydrated}
               className="rounded bg-zinc-900 px-4 py-2 text-sm text-white disabled:opacity-50"
             >
               {exportPhase === "declaracao"

@@ -2,12 +2,18 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
+import { produtosSelecionados } from "@/lib/domain/listas-produtos";
+import {
+  ListasProdutosEditor,
+  useListasProdutos,
+} from "@/components/ListasProdutosEditor";
 
 export function DeclaracaoApp() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const listas = useListasProdutos();
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -19,10 +25,17 @@ export function DeclaracaoApp() {
       return;
     }
 
+    const selecionada = produtosSelecionados(listas.state);
+    if (!selecionada.ok) {
+      setError(selecionada.error);
+      return;
+    }
+
     setLoading(true);
     try {
       const body = new FormData();
       body.append("file", file);
+      body.append("produtos", JSON.stringify(selecionada.produtos));
       const res = await fetch("/api/declaracoes", {
         method: "POST",
         body,
@@ -60,7 +73,7 @@ export function DeclaracaoApp() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-8 px-4 py-8">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-8">
       <header className="space-y-2">
         <p className="text-sm text-zinc-500">
           <Link href="/" className="underline-offset-2 hover:underline">
@@ -73,8 +86,8 @@ export function DeclaracaoApp() {
         <p className="text-sm text-zinc-600">
           Contingência: envie um XLSX do lote já exportado (útil se o lote não
           estiver mais no navegador). Uma pessoa baixa a declaração em .xlsx;
-          várias, um ZIP. O servidor copia o modelo fixo (remetente + produtos)
-          e preenche só o destinatário.
+          várias, um ZIP. O destinatário vem do arquivo. Os produtos vêm da
+          lista marcada abaixo.
         </p>
       </header>
 
@@ -93,6 +106,12 @@ export function DeclaracaoApp() {
         </div>
       )}
 
+      <ListasProdutosEditor
+        state={listas.state}
+        onChange={listas.setState}
+        warning={listas.warning}
+      />
+
       <form onSubmit={onSubmit} className="space-y-4 rounded border border-zinc-200 bg-white p-4">
         <label className="block space-y-1 text-sm">
           <span className="font-medium text-zinc-800">Arquivo do lote (.xlsx)</span>
@@ -110,7 +129,7 @@ export function DeclaracaoApp() {
 
         <button
           type="submit"
-          disabled={loading || !file}
+          disabled={loading || !file || !listas.hydrated}
           className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Gerando declaração…" : "Gerar declaração"}

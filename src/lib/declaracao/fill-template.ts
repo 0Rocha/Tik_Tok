@@ -1,9 +1,16 @@
 import JSZip from "jszip";
+import {
+  formatValorDeclaracao,
+  somaValores,
+  type ProdutoItem,
+} from "@/lib/domain/listas-produtos";
 import type { DeclaracaoDestinatario } from "./fallback-map";
 
 /**
  * Índices de sharedStrings exclusivos do destinatário/data no template
- * (Plan2 / sheet1). Não alterar outros índices — remetente e produtos dependem deles.
+ * (Plan2 / sheet1). Não alterar outros índices — o remetente depende deles.
+ * Produtos, quando informados, são gravados na própria célula (inline),
+ * porque vários valores do modelo compartilham o mesmo shared string.
  */
 const SI = {
   nome: 24,
@@ -19,6 +26,10 @@ const SI = {
 const SHEET_PATH = "xl/worksheets/sheet1.xml";
 const SHARED_STRINGS_PATH = "xl/sharedStrings.xml";
 const DRAWING_PATH = "xl/drawings/drawing1.xml";
+
+const PRODUTO_FIRST_ROW = 18;
+const PRODUTO_ROW_COUNT = 12;
+const TOTAL_CELL = "J30";
 
 export const DECLARACAO_CELLS = {
   nome: "C11",
@@ -84,6 +95,67 @@ function clearFoneCell(sheetXml: string): string {
   return replaced;
 }
 
+function withCell(
+  sheetXml: string,
+  ref: string,
+  build: (styleAttr: string) => string,
+): string {
+  const pattern = new RegExp(
+    `<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`,
+  );
+  const match = sheetXml.match(pattern);
+  if (!match) {
+    throw new Error(`Célula ${ref} não encontrada no template.`);
+  }
+  const style = match[1].match(/\ss="([^"]+)"/);
+  const styleAttr = style ? ` s="${style[1]}"` : "";
+  return sheetXml.replace(pattern, () => build(styleAttr));
+}
+
+function inlineCell(ref: string, styleAttr: string, text: string): string {
+  const needsPreserve = text !== text.trim() || /\s{2,}/.test(text);
+  const tAttr = needsPreserve ? ' xml:space="preserve"' : "";
+  const t =
+    text.length === 0 ? "<t/>" : `<t${tAttr}>${escapeXml(text)}</t>`;
+  return `<c r="${ref}"${styleAttr} t="inlineStr"><is>${t}</is></c>`;
+}
+
+function applyProdutos(sheetXml: string, produtos: ProdutoItem[]): string {
+  if (produtos.length < 1 || produtos.length > PRODUTO_ROW_COUNT) {
+    throw new Error("Informe de 1 a 12 produtos.");
+  }
+
+  let sheet = sheetXml;
+  for (let i = 0; i < PRODUTO_ROW_COUNT; i++) {
+    const row = PRODUTO_FIRST_ROW + i;
+    const item = produtos[i];
+    sheet = withCell(sheet, `A${row}`, (styleAttr) =>
+      item
+        ? `<c r="A${row}"${styleAttr}><v>${item.quantidade}</v></c>`
+        : `<c r="A${row}"${styleAttr}/>`,
+    );
+    sheet = withCell(sheet, `C${row}`, (styleAttr) =>
+      inlineCell(`C${row}`, styleAttr, item?.nome ?? ""),
+    );
+    sheet = withCell(sheet, `J${row}`, (styleAttr) =>
+      inlineCell(
+        `J${row}`,
+        styleAttr,
+        item ? formatValorDeclaracao(item.valor) : "",
+      ),
+    );
+  }
+
+  sheet = withCell(sheet, TOTAL_CELL, (styleAttr) =>
+    inlineCell(
+      TOTAL_CELL,
+      styleAttr,
+      formatValorDeclaracao(somaValores(produtos)),
+    ),
+  );
+  return sheet;
+}
+
 function toBuffer(
   input: Buffer | ArrayBuffer | Uint8Array,
 ): ArrayBuffer {
@@ -107,6 +179,7 @@ function toBuffer(
 export async function fillDeclaracaoTemplate(
   templateBytes: Buffer | ArrayBuffer | Uint8Array,
   dest: DeclaracaoDestinatario,
+  produtos?: ProdutoItem[],
 ): Promise<ArrayBuffer> {
   const zip = await JSZip.loadAsync(toBuffer(templateBytes));
 
@@ -133,6 +206,9 @@ export async function fillDeclaracaoTemplate(
 
   let sheet = await sheetFile.async("string");
   sheet = clearFoneCell(sheet);
+  if (produtos) {
+    sheet = applyProdutos(sheet, produtos);
+  }
 
   zip.file(SHARED_STRINGS_PATH, shared);
   zip.file(SHEET_PATH, sheet);

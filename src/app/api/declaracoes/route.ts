@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseProdutos, type ProdutoItem } from "@/lib/domain/listas-produtos";
 import type { XlsxRow } from "@/lib/domain/types";
 import {
   generateDeclaracoesFromRows,
@@ -21,7 +22,7 @@ function arquivoResponse(arquivo: DeclaracoesArquivo): NextResponse {
 }
 
 function errorStatus(message: string): number {
-  return /cabeçalho|lote vazio|faltam campos|linha \d+|envie|json|rows/i.test(
+  return /cabeçalho|lote vazio|faltam campos|linha \d+|envie|json|rows|produto/i.test(
     message,
   )
     ? 400
@@ -45,7 +46,32 @@ function isXlsxRow(value: unknown): value is XlsxRow {
   );
 }
 
-async function rowsFromJson(request: Request): Promise<XlsxRow[]> {
+type DeclaracaoRequest = {
+  rows: XlsxRow[];
+  produtos?: ProdutoItem[];
+};
+
+function produtosFromBody(body: object): ProdutoItem[] | undefined {
+  if (!("produtos" in body)) return undefined;
+  return parseProdutos((body as { produtos: unknown }).produtos);
+}
+
+function produtosFromForm(form: FormData): ProdutoItem[] | undefined {
+  const raw = form.get("produtos");
+  if (raw == null || raw === "") return undefined;
+  if (typeof raw !== "string") {
+    throw new Error("produtos deve ser uma lista.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("JSON inválido.");
+  }
+  return parseProdutos(parsed);
+}
+
+async function fromJson(request: Request): Promise<DeclaracaoRequest> {
   let body: unknown;
   try {
     body = await request.json();
@@ -68,10 +94,10 @@ async function rowsFromJson(request: Request): Promise<XlsxRow[]> {
       "Cada item de rows deve ter os campos do lote (strings e valor/correio number|null).",
     );
   }
-  return raw;
+  return { rows: raw, produtos: produtosFromBody(body) };
 }
 
-async function rowsFromMultipart(request: Request): Promise<XlsxRow[]> {
+async function fromMultipart(request: Request): Promise<DeclaracaoRequest> {
   let form: FormData;
   try {
     form = await request.formData();
@@ -81,6 +107,7 @@ async function rowsFromMultipart(request: Request): Promise<XlsxRow[]> {
     );
   }
 
+  const produtos = produtosFromForm(form);
   const file = form.get("file");
   if (!(file instanceof File)) {
     throw new Error("Envie o arquivo do lote no campo file.");
@@ -89,18 +116,18 @@ async function rowsFromMultipart(request: Request): Promise<XlsxRow[]> {
     throw new Error("O arquivo deve ser .xlsx.");
   }
 
-  return parseLoteBuffer(await file.arrayBuffer());
+  return { rows: await parseLoteBuffer(await file.arrayBuffer()), produtos };
 }
 
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type") ?? "";
 
   try {
-    const rows = contentType.includes("application/json")
-      ? await rowsFromJson(request)
-      : await rowsFromMultipart(request);
+    const { rows, produtos } = contentType.includes("application/json")
+      ? await fromJson(request)
+      : await fromMultipart(request);
 
-    const arquivo = await generateDeclaracoesFromRows(rows);
+    const arquivo = await generateDeclaracoesFromRows(rows, produtos);
     return arquivoResponse(arquivo);
   } catch (err) {
     const message =

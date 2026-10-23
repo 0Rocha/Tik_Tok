@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import type { ProdutoItem } from "@/lib/domain/listas-produtos";
 import type { DeclaracaoDestinatario } from "./fallback-map";
 import { fillDeclaracaoTemplate, sanitizeFilename } from "./fill-template";
 
@@ -20,6 +21,7 @@ export function declaracaoFilenames(nomes: string[]): string[] {
 export async function buildDeclaracoesZip(
   templateBytes: Buffer | ArrayBuffer | Uint8Array,
   destinatarios: DeclaracaoDestinatario[],
+  produtos?: ProdutoItem[],
 ): Promise<Buffer> {
   if (destinatarios.length === 0) {
     throw new Error("Nenhum destinatário para gerar.");
@@ -29,7 +31,11 @@ export async function buildDeclaracoesZip(
   const names = declaracaoFilenames(destinatarios.map((d) => d.nome));
 
   for (let i = 0; i < destinatarios.length; i++) {
-    const xlsx = await fillDeclaracaoTemplate(templateBytes, destinatarios[i]!);
+    const xlsx = await fillDeclaracaoTemplate(
+      templateBytes,
+      destinatarios[i]!,
+      produtos,
+    );
     zip.file(names[i]!, Buffer.from(xlsx));
   }
 

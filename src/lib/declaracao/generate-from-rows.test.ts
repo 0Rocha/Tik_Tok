@@ -45,6 +45,22 @@ describe("generateDeclaracoesFromRows", () => {
     expect(arquivo.bytes.byteLength).toBeGreaterThan(100);
   });
 
+  it("recusa lista de produtos vazia ou com mais de 12 itens", async () => {
+    await expect(generateDeclaracoesFromRows([baseRow()], [])).rejects.toThrow(
+      /1 a 12 produtos/i,
+    );
+    await expect(
+      generateDeclaracoesFromRows(
+        [baseRow()],
+        Array.from({ length: 13 }, () => ({
+          quantidade: 1,
+          nome: "Item",
+          valor: 1,
+        })),
+      ),
+    ).rejects.toThrow(/1 a 12 produtos/i);
+  });
+
   it("devolve zip quando há mais de uma pessoa", async () => {
     const arquivo = await generateDeclaracoesFromRows([
       baseRow(),
